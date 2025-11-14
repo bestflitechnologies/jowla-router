@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://routeuser:routepass@db:5432/routeoptimizer?schema=public
+      - OSRM_URL=http://osrm:5000
+      - NEXT_PUBLIC_MAP_CENTER_LAT=49.2827
+      - NEXT_PUBLIC_MAP_CENTER_LNG=-123.1207
+    depends_on:
+      db:
+        condition: service_healthy
+      osrm:
+        condition: service_started
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    command: sh -c "npx prisma migrate deploy && npm run dev"
+
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      - POSTGRES_USER=routeuser
+      - POSTGRES_PASSWORD=routepass
+      - POSTGRES_DB=routeoptimizer
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U routeuser -d routeoptimizer"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  osrm:
+    image: osrm/osrm-backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - osrm_data:/data
+    command: sh -c "
+      if [ ! -f /data/north-america-latest.osrm ]; then
+        wget -O /data/north-america-latest.osm.pbf https://download.geofabrik.de/north-america-latest.osm.pbf &&
+        osrm-extract -p /opt/car.lua /data/north-america-latest.osm.pbf &&
+        osrm-partition /data/north-america-latest.osrm &&
+        osrm-customize /data/north-america-latest.osrm;
+      fi &&
+      osrm-routed --algorithm mld /data/north-america-latest.osrm
+      "
+
+volumes:
+  postgres_data:
+  osrm_data:
